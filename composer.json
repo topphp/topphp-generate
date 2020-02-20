@@ -1,0 +1,55 @@
+{
+    "name": "topphp/topphp-generate",
+    "type": "library",
+    "description": "PHP生成工具",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "topphp",
+            "email": "sleep@kaituocn.com",
+            "homepage": "https://github.com/topphp",
+            "role": "Developer"
+        }
+    ],
+    "require": {
+        "php": "~7.2",
+        "nette/php-generator": "^3.3",
+        "topthink/framework": "^6.0.2"
+    },
+    "require-dev": {
+        "squizlabs/php_codesniffer": "^3.5",
+        "topphp/topphp-testing": "*"
+    },
+    "autoload": {
+        "psr-4": {
+            "Topphp\\TopphpGenerate\\": "src"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Topphp\\Test\\": "tests"
+        }
+    },
+    "scripts": {
+        "test": "./vendor/bin/phpunit -c ./phpunit.xml.dist",
+        "check-style": "phpcs src tests",
+        "fix-style": "phpcbf src tests"
+    },
+    "extra": {
+        "think": {
+            "services": [
+                "Topphp\\TopphpGenerate\\Service"
+            ],
+            "config": {}
+        }
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "repositories": {
+        "packagist": {
+            "type": "composer",
+            "url": "https://mirrors.aliyun.com/composer"
+        }
+    }
+}
