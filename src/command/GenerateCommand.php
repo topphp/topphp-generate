@@ -82,7 +82,8 @@ FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME=? AND TABLE_SCHEMA=?',
             // 遍历类中的字段属性
             foreach ($columns as $column) {
                 // 类头添加字段注释
-                $class->addComment("@property {$this->checkType($column['DATA_TYPE'])} {$column['COLUMN_NAME']} {$column['COLUMN_COMMENT']}");
+                $class->addComment("@property {$this->checkType($column['DATA_TYPE'])} \${$column['COLUMN_NAME']} {$column['COLUMN_COMMENT']}");
+//                $class->addMethod()->setBody()
                 // 判断字段为主键则定义 $pk属性.
                 if ($column['COLUMN_KEY'] === 'PRI') {
                     $class->addProperty('pk', $column['COLUMN_NAME'])->setProtected();
