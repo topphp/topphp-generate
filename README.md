@@ -39,7 +39,7 @@ $ composer require topphp/topphp-generate
 
 ## Usage
 需要先配置数据库信息 `config/database.php` 后进行命令行生成
-``` shell script
+``` shell
 php think gen:db
 ```
 
