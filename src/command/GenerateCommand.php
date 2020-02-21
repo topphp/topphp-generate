@@ -42,11 +42,13 @@ class GenerateCommand extends Command
     {
         $this->setName('gen:db')
             ->addOption('table', 't', Option::VALUE_OPTIONAL, '指定生成实体类的表名,默认为所有表格', 'all')
-            ->setDescription('生成数据库');
+            ->setDescription('生成数据库实体模型');
     }
 
     public function handle()
     {
+        $baseModel = $this->createBaseModel('BaseModel');
+        var_dump($baseModel);
         // 获取数据库名称
         $database = $this->app->config->get('database.connections.mysql.database');
         // 获取表前缀
@@ -59,7 +61,7 @@ class GenerateCommand extends Command
         foreach ($tables as $key => $table) {
             // 获取每个表中的列
             $columns = Db::query(
-                'SELECT COLUMN_NAME,COLUMN_COMMENT,DATA_TYPE ,COLUMN_KEY
+                'SELECT COLUMN_NAME,COLUMN_COMMENT,DATA_TYPE ,COLUMN_KEY,TABLE_NAME
 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME=? AND TABLE_SCHEMA=?',
                 [current($table), $database]
             );
@@ -70,15 +72,17 @@ FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME=? AND TABLE_SCHEMA=?',
             // 创建一个php文件
             $file = new PhpFile();
             // 设置严格模式
-            $file->setStrictTypes();
+            $file->setStrictTypes()
+                ->addComment("@copyright 凯拓软件 [临渊羡鱼不如退而结网,凯拓与你一同成长]")
+                ->addComment("@author sleep <sleep@kaituocn.com>");
             // 定义命名空间 todo 这里以后可以优化(自动获取或者通过配置来定义)
             $namespace = $file
                 ->addNamespace('app\model\entity')
-                ->addUse(Model::class);
+                ->addUse("app\model\\{$baseModel}");
             // 生成类并继承 think\Model
             $class = $namespace
                 ->addClass($className)
-                ->addExtend(Model::class);
+                ->addExtend("app\model\\{$baseModel}");
             // 遍历类中的字段属性
             foreach ($columns as $column) {
                 // 类头添加字段注释
@@ -87,6 +91,7 @@ FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME=? AND TABLE_SCHEMA=?',
                 // 判断字段为主键则定义 $pk属性.
                 if ($column['COLUMN_KEY'] === 'PRI') {
                     $class->addProperty('pk', $column['COLUMN_NAME'])->setProtected();
+                    $class->addProperty('table', $column['TABLE_NAME'])->setProtected();
                 }
             }
             // 生成完整文件路径
@@ -101,5 +106,24 @@ FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME=? AND TABLE_SCHEMA=?',
             @file_put_contents($path, $file);
         }
         exec('composer fix-style');
+    }
+
+    private function createBaseModel(string $modelName): String
+    {
+        $modelName = Str::studly($modelName);
+        $file      = new PhpFile();
+        $file->setStrictTypes(true)
+            ->addComment("@copyright 凯拓软件 [临渊羡鱼不如退而结网,凯拓与你一同成长]")
+            ->addComment("@author sleep <sleep@kaituocn.com>");
+        $namespace = $file->addNamespace('app\model')->addUse(Model::class);
+        /** @var Model $class */
+        $class = $namespace
+            ->addClass($modelName)
+            ->addExtend(Model::class);
+        $path  = app_path() . "model/{$modelName}.php";
+        if (!file_exists($path)) {
+            @file_put_contents($path, $file);
+        }
+        return $class->getName();
     }
 }
