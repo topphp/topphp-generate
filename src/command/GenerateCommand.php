@@ -48,7 +48,6 @@ class GenerateCommand extends Command
     public function handle()
     {
         $baseModel = $this->createBaseModel('BaseModel');
-        var_dump($baseModel);
         // 获取数据库名称
         $database = $this->app->config->get('database.connections.mysql.database');
         // 获取表前缀
@@ -78,28 +77,34 @@ FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME=? AND TABLE_SCHEMA=?',
             // 定义命名空间 todo 这里以后可以优化(自动获取或者通过配置来定义)
             $namespace = $file
                 ->addNamespace('app\model\entity')
+                ->addUse(Model::class)
                 ->addUse("app\model\\{$baseModel}");
             // 生成类并继承 think\Model
             $class = $namespace
                 ->addClass($className)
-                ->addExtend("app\model\\{$baseModel}");
+                ->addExtend(Model::class);
             // 遍历类中的字段属性
+            $schema = [];   // 设置模型的 schema 字段信息
             foreach ($columns as $column) {
                 // 类头添加字段注释
-                $class->addComment("@property {$this->checkType($column['DATA_TYPE'])} \${$column['COLUMN_NAME']} {$column['COLUMN_COMMENT']}");
+                $class->addTrait("app\model\\{$baseModel}")
+                    ->addComment("@property {$this->checkType($column['DATA_TYPE'])} \${$column['COLUMN_NAME']} {$column['COLUMN_COMMENT']}");
                 // 判断字段为主键则定义 $pk属性.
                 if ($column['COLUMN_KEY'] === 'PRI') {
                     $class->addProperty('pk', $column['COLUMN_NAME'])->setProtected();
-                    $class->addProperty('table', $column['TABLE_NAME'])->setProtected();
                 }
+                $class->addProperty('table', $column['TABLE_NAME'])->setProtected();
+                $schema[$column['COLUMN_NAME']] = $column['DATA_TYPE'];
             }
+//            var_dump($schema);
+            $class->addProperty('schema', $schema)->setProtected();
             // 生成完整文件路径
             $path = app_path() . 'model/entity/' . $className . '.php';
             $this->output->info('正在生成实体类: ' . $className);
             $dirName = dirname($path);
             // 判断是否有文件夹 没有则创建
             if (!is_dir($dirName)) {
-                mkdir($dirName, 0777, true);
+                mkdir($dirName, 0755, true);
             }
             // 每次重新覆盖生成新文件
             @file_put_contents($path, $file);
@@ -114,12 +119,10 @@ FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME=? AND TABLE_SCHEMA=?',
         $file->setStrictTypes(true)
             ->addComment("@copyright 凯拓软件 [临渊羡鱼不如退而结网,凯拓与你一同成长]")
             ->addComment("@author sleep <sleep@kaituocn.com>");
-        $namespace = $file->addNamespace('app\model')->addUse(Model::class);
-        /** @var Model $class */
-        $class = $namespace
-            ->addClass($modelName)
-            ->addExtend(Model::class);
-        $path  = app_path() . "model/{$modelName}.php";
+        $namespace = $file->addNamespace('app\model');
+        $class     = $namespace
+            ->addTrait($modelName);
+        $path      = app_path() . "model/{$modelName}.php";
         if (!file_exists($path)) {
             @file_put_contents($path, $file);
         }
