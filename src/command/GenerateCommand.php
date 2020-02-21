@@ -96,7 +96,6 @@ FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME=? AND TABLE_SCHEMA=?',
                 $class->addProperty('table', $column['TABLE_NAME'])->setProtected();
                 $schema[$column['COLUMN_NAME']] = $column['DATA_TYPE'];
             }
-//            var_dump($schema);
             $class->addProperty('schema', $schema)->setProtected();
             // 生成完整文件路径
             $path = app_path() . 'model/entity/' . $className . '.php';
