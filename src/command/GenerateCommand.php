@@ -56,6 +56,11 @@ class GenerateCommand extends Command
         $tables = Db::query("SHOW TABLES");
         // 每次生成前先清空一下目录 todo 此处可优化
         shell_exec('rm -rf ./app/model/entity/*');
+        // 获取app目录下所有二级model目录
+        $appDir = $this->isExistDir($this->queryDir(app_path()), "model");
+        if (!empty($appDir)) {
+            unset($appDir[array_search("model\\", $appDir)]);
+        }
         // 遍历所有表
         foreach ($tables as $key => $table) {
             // 获取每个表中的列
@@ -107,6 +112,10 @@ FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME=? AND TABLE_SCHEMA=?',
             }
             // 每次重新覆盖生成新文件
             @file_put_contents($path, $file);
+            // 检查多模块是否存在model文件夹，存在则添加Dao
+            if (!empty($appDir)) {
+                $this->createDao($appDir, $className, "app\model\\entity\\{$className}");
+            }
         }
         exec('composer fix-style');
     }
@@ -122,9 +131,69 @@ FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME=? AND TABLE_SCHEMA=?',
         $class     = $namespace
             ->addTrait($modelName);
         $path      = app_path() . "model/{$modelName}.php";
+        $dir       = app_path() . "model/";
+        !is_dir($dir) && @mkdir($dir, 0755, true);
         if (!file_exists($path)) {
             @file_put_contents($path, $file);
         }
         return $class->getName();
+    }
+
+    private function queryDir($dir, $limit = 2, $deep = 0)
+    {
+        $array   = [];
+        $handler = scandir($dir);
+        $deep++;
+        foreach ($handler as $v) {
+            if (is_dir($dir . "/" . $v) && $v != "." && $v != "..") {
+                if ($limit == 0 || $limit >= $deep) {
+                    $array[$v] = $this->queryDir($dir . "/" . $v, $limit, $deep);
+                }
+            }
+        }
+        return $array;
+    }
+
+    private function isExistDir($dirArr, $existDir)
+    {
+        $array = [];
+        if (!empty($dirArr) && is_array($dirArr)) {
+            foreach ($dirArr as $k1 => $v1) {
+                $returnDir1 = $k1 . "\\";
+                if ($k1 == $existDir) {
+                    array_push($array, $returnDir1);
+                }
+                if (!empty($v1) && is_array($v1)) {
+                    foreach ($v1 as $k2 => $v2) {
+                        $returnDir2 = $returnDir1 . $k2;
+                        if ($k2 == $existDir) {
+                            array_push($array, $returnDir2);
+                        }
+                    }
+                }
+            }
+        }
+        return $array;
+    }
+
+    private function createDao($appDir, $className, $use)
+    {
+        foreach ($appDir as $app) {
+            // 生成完整文件路径
+            $path = app_path() . $app . DIRECTORY_SEPARATOR . $className . 'Dao.php';
+            if (!file_exists($path)) {
+                $this->output->info('正在生成Dao层: ' . 'app\\' . $app . DIRECTORY_SEPARATOR . $className . 'Dao.php');
+                $file = new PhpFile();
+                $file->setStrictTypes(true)
+                    ->addComment("@copyright 凯拓软件 [临渊羡鱼不如退而结网,凯拓与你一同成长]")
+                    ->addComment("@author sleep <sleep@kaituocn.com>");
+                $namespace = $file->addNamespace('app\\' . $app)
+                    ->addUse($use);
+                $class     = $namespace
+                    ->addClass($className . "Dao")
+                    ->addExtend($use);
+                @file_put_contents($path, $file);
+            }
+        }
     }
 }

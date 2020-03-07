@@ -41,6 +41,13 @@ $ composer require topphp/topphp-generate
 需要先配置数据库信息 `config/database.php` 后进行命令行生成
 ``` shell
 php think gen:db
+注意事项：
+    1、自动生成：在topphp骨架里，多应用情况下，gen:db组件会根据你是否创建了对应的应用模块（如admin）下的model的文件夹来判断是否自动创建对应的model文件
+    2、创建规范：应用模块（如admin）下的model文件统一会继承app/model/entity下的模型实体类,并全部以Dao.php结尾（此Dao层主要用于编写数据库业务）
+    3、添加新的表：如果开发过程中需要添加新的数据表，可以执行 php think gen:db 进行自动更新模型实体类与模型Dao
+    4、特别说明：
+          a、每次执行 php think gen:db 模型实体类都会重置一遍，所以请不要直接编辑操作模型实体类
+          b、每次执行 php think gen:db 对于已存在的模型Dao不会清空代码，对于不存在的模型Dao会自动创建（例如中途添加新的数据表场景）。
 ```
 
 ## Change log
