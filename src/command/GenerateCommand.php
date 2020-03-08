@@ -54,8 +54,17 @@ class GenerateCommand extends Command
         $prefix = $this->app->config->get('database.connections.mysql.prefix');
         // 显示全部表名
         $tables = Db::query("SHOW TABLES");
-        // 每次生成前先清空一下目录 todo 此处可优化
-        shell_exec('rm -rf ./app/model/entity/*');
+        // 每次生成前先清空一下目录（已做win系统兼容）
+        if ($this->isWin()) {
+            $files = $this->fileList(app_path() . "model" . DIRECTORY_SEPARATOR . "entity");
+            if (!empty($files)) {
+                foreach ($files as $f) {
+                    @unlink(app_path() . "model" . DIRECTORY_SEPARATOR . "entity" . DIRECTORY_SEPARATOR . $f);
+                }
+            }
+        } else {
+            shell_exec('rm -rf ./app/model/entity/*');
+        }
         // 获取app目录下所有二级model目录
         $appDir = $this->isExistDir($this->queryDir(app_path()), "model");
         if (!empty($appDir)) {
@@ -139,6 +148,26 @@ FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME=? AND TABLE_SCHEMA=?',
         return $class->getName();
     }
 
+    private function isWin()
+    {
+        return DIRECTORY_SEPARATOR == '\\' ? true : false;
+    }
+
+    private function fileList($dir)
+    {
+        $list   = [];
+        $handle = opendir($dir);
+        $i      = 0;
+        while (!!$file = readdir($handle)) {
+            if (($file != ".") and ($file != "..")) {
+                $list[$i] = $file;
+                $i        = $i + 1;
+            }
+        }
+        closedir($handle);
+        return $list;
+    }
+
     private function queryDir($dir, $limit = 2, $deep = 0)
     {
         $array   = [];
@@ -179,10 +208,21 @@ FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME=? AND TABLE_SCHEMA=?',
     private function createDao($appDir, $className, $use)
     {
         foreach ($appDir as $app) {
+            // 删除骨架DemoDao文件
+            $delPath = app_path() . str_replace("\\", DIRECTORY_SEPARATOR, $app) . DIRECTORY_SEPARATOR . 'DemoDao.php';
+            @unlink($delPath);
             // 生成完整文件路径
-            $path = app_path() . $app . DIRECTORY_SEPARATOR . $className . 'Dao.php';
+            $path = app_path() . str_replace(
+                "\\",
+                DIRECTORY_SEPARATOR,
+                $app
+            ) . DIRECTORY_SEPARATOR . $className . 'Dao.php';
             if (!file_exists($path)) {
-                $this->output->info('正在生成Dao层: ' . 'app\\' . $app . DIRECTORY_SEPARATOR . $className . 'Dao.php');
+                $this->output->info('正在生成Dao层: ' . str_replace(
+                    "\\",
+                    DIRECTORY_SEPARATOR,
+                    'app\\' . $app
+                ) . DIRECTORY_SEPARATOR . $className . 'Dao.php');
                 $file = new PhpFile();
                 $file->setStrictTypes(true)
                     ->addComment("@copyright 凯拓软件 [临渊羡鱼不如退而结网,凯拓与你一同成长]")
