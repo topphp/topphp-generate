@@ -13,6 +13,6 @@ class ExampleTest extends TestCase
      */
     public function testTrueIsTrue()
     {
-        $this->assertTrue(true);
+        return $this->assertTrue(true);
     }
 }
