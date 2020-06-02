@@ -42,6 +42,7 @@ class GenerateCommand extends Command
     {
         $this->setName('gen:db')
             ->addOption('table', 't', Option::VALUE_OPTIONAL, '指定生成实体类的表名,默认为所有表格', 'all')
+            ->addOption('base_model', 'b', Option::VALUE_OPTIONAL, '指定生成实体类的表名,默认为所有表格', 'yes')
             ->setDescription('生成数据库实体模型');
     }
 
@@ -131,21 +132,32 @@ FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME=? AND TABLE_SCHEMA=?',
 
     private function createBaseModel(string $modelName): String
     {
-        $modelName = Str::studly($modelName);
-        $file      = new PhpFile();
-        $file->setStrictTypes(true)
-            ->addComment("@copyright 凯拓软件 [临渊羡鱼不如退而结网,凯拓与你一同成长]")
-            ->addComment("@author sleep <sleep@kaituocn.com>");
-        $namespace = $file->addNamespace('app\model');
-        $class     = $namespace
-            ->addTrait($modelName);
-        $path      = app_path() . "model/{$modelName}.php";
-        $dir       = app_path() . "model/";
-        !is_dir($dir) && @mkdir($dir, 0755, true);
-        if (!file_exists($path)) {
-            @file_put_contents($path, $file);
+        if ($this->input->hasOption('base_model') && $this->input->getOption('base_model') === 'yes') {
+            $baseModelFile = dirname(__FILE__) . DIRECTORY_SEPARATOR . "data" . DIRECTORY_SEPARATOR . "BaseModel.php";
+            $path          = app_path() . "model/{$modelName}.php";
+            $installDir    = app_path() . "model/";
+            !is_dir($installDir) && @mkdir($installDir, 0755, true);
+            if (!file_exists($path)) {
+                @copy($baseModelFile, $installDir);
+            }
+            return $modelName;
+        } else {
+            $modelName = Str::studly($modelName);
+            $file      = new PhpFile();
+            $file->setStrictTypes(true)
+                ->addComment("@copyright 凯拓软件 [临渊羡鱼不如退而结网,凯拓与你一同成长]")
+                ->addComment("@author sleep <sleep@kaituocn.com>");
+            $namespace = $file->addNamespace('app\model');
+            $class     = $namespace
+                ->addTrait($modelName);
+            $path      = app_path() . "model/{$modelName}.php";
+            $dir       = app_path() . "model/";
+            !is_dir($dir) && @mkdir($dir, 0755, true);
+            if (!file_exists($path)) {
+                @file_put_contents($path, $file);
+            }
+            return $class->getName();
         }
-        return $class->getName();
     }
 
     private function isWin()
@@ -213,16 +225,16 @@ FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME=? AND TABLE_SCHEMA=?',
             @unlink($delPath);
             // 生成完整文件路径
             $path = app_path() . str_replace(
-                "\\",
-                DIRECTORY_SEPARATOR,
-                $app
-            ) . DIRECTORY_SEPARATOR . $className . 'Dao.php';
-            if (!file_exists($path)) {
-                $this->output->info('正在生成Dao层: ' . str_replace(
                     "\\",
                     DIRECTORY_SEPARATOR,
-                    'app\\' . $app
-                ) . DIRECTORY_SEPARATOR . $className . 'Dao.php');
+                    $app
+                ) . DIRECTORY_SEPARATOR . $className . 'Dao.php';
+            if (!file_exists($path)) {
+                $this->output->info('正在生成Dao层: ' . str_replace(
+                        "\\",
+                        DIRECTORY_SEPARATOR,
+                        'app\\' . $app
+                    ) . DIRECTORY_SEPARATOR . $className . 'Dao.php');
                 $file = new PhpFile();
                 $file->setStrictTypes(true)
                     ->addComment("@copyright 凯拓软件 [临渊羡鱼不如退而结网,凯拓与你一同成长]")
