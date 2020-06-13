@@ -22,6 +22,12 @@ trait BaseModel
      */
     protected $modelError = "";
 
+    /**
+     * 原始数据
+     * @var array $modelData
+     */
+    private $modelData = [];
+
     //************************************ --- Trait内部方法 --- ****************************************//
 
     /**
@@ -78,15 +84,21 @@ trait BaseModel
     /**
      * 隐藏字段
      * @param array $data
+     * @param bool $isItem
      * @return mixed
      */
-    private function hiddenField(array $data)
+    private function hiddenField(array $data, $isItem = false)
     {
+        if ($isItem) {
+            $this->modelData[] = $data;
+        } else {
+            $this->modelData = $data;
+        }
         if (!empty($this->hidden)) {
             $level = $this->arrayLevel($data);
             if ($level == 1) {
                 foreach ($data as $key => $val) {
-                    if (in_array($key, $this->hidden)) {
+                    if (in_array((string)$key, $this->hidden)) {
                         unset($data[$key]);
                     }
                 }
@@ -94,7 +106,7 @@ trait BaseModel
                 foreach ($data as $key => &$val) {
                     if (is_array($val)) {
                         foreach ($val as $k => $v) {
-                            if (in_array($k, $this->hidden)) {
+                            if (in_array((string)$k, $this->hidden)) {
                                 unset($val[$k]);
                             }
                         }
@@ -113,9 +125,11 @@ trait BaseModel
      */
     private function filterField(array $data, bool $isUpdate = false)
     {
-        foreach ($data as $k => $v) {
-            if (!array_key_exists($k, $this->schema)) {
-                unset($data[$k]);
+        if (isset($this->schema) && is_array($this->schema)) {
+            foreach ($data as $k => $v) {
+                if (!array_key_exists($k, $this->schema)) {
+                    unset($data[$k]);
+                }
             }
         }
         if ($isUpdate && isset($this->schema['update_time'])) {
@@ -127,14 +141,18 @@ trait BaseModel
     /**
      * 格式化新增数据
      * @param array $list
+     * @param bool $filter
      * @return array
      */
-    private function formatList(array $list)
+    private function formatList(array $list, bool $filter = false)
     {
         $resList = [];
         $idName  = $this->getPk();
         foreach ($list as $item) {
             unset($item[$idName]);
+            if ($filter) {
+                $item = $this->filterField($item);
+            }
             $resList[] = $item;
         }
         return $resList;
@@ -237,27 +255,33 @@ trait BaseModel
                 $where[1] = strtoupper($where[1]);
                 $where    = [$where];
             }
-        } elseif ($where === "*") {
+        } elseif ($where === "*" || empty($where)) {
             $where = [];
         }
         $whereNotNull = [];
         $whereExp     = [];
         if (is_array($where) && !empty($where) && $this->arrayLevel($where) >= 2) {
+            $isParse = false;
             foreach ($where as $wk => $exps) {
                 switch (strtolower($exps[1])) {
                     case "<>":
                         if ($exps[2] === null || $exps[2] === 'null') {
                             $whereNotNull[] = $exps[0];
                             unset($where[$wk]);
+                            $isParse = true;
                         }
                         break;
                     case "exp":
                         if (is_string($exps[2])) {
                             $whereExp[] = [$exps[0], 'exp', Db::raw($exps[2])];
                             unset($where[$wk]);
+                            $isParse = true;
                         }
                         break;
                 }
+            }
+            if ($isParse) {
+                $where = array_values($where);
             }
         }
         return [
@@ -268,7 +292,20 @@ trait BaseModel
     }
 
     /**
-     * 构建Model
+     * parsePk
+     * @return string
+     */
+    private function parsePk()
+    {
+        $idName = $this->getPk();
+        if (!isset($this->schema[$idName]) && !empty($this->schema)) {
+            $idName = "";
+        }
+        return $idName;
+    }
+
+    /**
+     * genBaseModel
      * @param array|string|int|callable $where
      * @param string $pkName
      * @param string $isOr
@@ -276,6 +313,7 @@ trait BaseModel
      */
     private function genBaseModel($where, string $pkName, string $isOr = "and")
     {
+        $this->modelData = [];
         /**
          * @var mixed $where
          * @var array $whereNotNull
@@ -296,7 +334,7 @@ trait BaseModel
                     }
                 });
             } else {
-                $model = static::where($pkName, $where);
+                $model = empty($pkName) ? static::where([]) : static::where($pkName, $where);
             }
         } else {
             if (is_array($where) || $where instanceof \Closure) {
@@ -310,10 +348,47 @@ trait BaseModel
                     $model->where($whereExp);
                 }
             } else {
-                $model = static::where($pkName, $where);
+                $model = empty($pkName) ? static::where([]) : static::where($pkName, $where);
             }
         }
         return $model;
+    }
+
+    /**
+     * genStepModel
+     * @param $where
+     * @param string $field
+     * @param $step
+     * @return array|bool
+     */
+    private function genStepModel($where, string $field, $step)
+    {
+        if (empty($where) || empty($field)) {
+            $this->modelError = "where OR field is not empty";
+            return false;
+        }
+        $allowType = ['tinyint', 'smallint', 'mediumint', 'int', 'integer', 'bigint', 'float', 'double', 'decimal'];
+        if (!empty($this->schema[$field])) {
+            if (!in_array($this->schema[$field], $allowType)) {
+                $this->modelError = "field format error, must be numeric type";
+                return false;
+            }
+        }
+        if (!is_numeric($step)) {
+            $this->modelError = "step must be numeric";
+            return false;
+        }
+        if ((float)$step == 0) {
+            $this->modelError = "step:0";
+            return false;
+        } else {
+            $step = (float)$step;
+        }
+        $idName = $this->parsePk();
+        return [
+            "model" => $this->genBaseModel($where, $idName),
+            "step"  => $step
+        ];
     }
 
     /**
@@ -379,7 +454,7 @@ trait BaseModel
             $this->modelError = "where is not empty";
             return false;
         }
-        // 构造where
+        $this->modelData = [];
         /**
          * @var mixed $where
          * @var array $whereNotNull
@@ -397,9 +472,9 @@ trait BaseModel
                         array_push($mainField, substr($field, 5));
                         unset($fields[$k]);
                     } elseif (!preg_match("/\./", $field) && isset($this->schema) && in_array(
-                            $field,
-                            array_keys($this->schema)
-                        )) {
+                        $field,
+                        array_keys($this->schema)
+                    )) {
                         // 区分是否是主表字段
                         array_push($mainField, $field);
                         unset($fields[$k]);
@@ -418,7 +493,7 @@ trait BaseModel
         $selectField = $fields;
         // 附表字段自动加别名去重
         $allAlias = [];
-        if (!empty($selectField)) {
+        if (!empty($selectField) && is_array($selectField)) {
             if ($this->arrayLevel($join) == 1) {
                 if (preg_match("/( |　|\s)/", $join[0])) {
                     // 带别名
@@ -484,6 +559,9 @@ trait BaseModel
             }
             $selectField = array_merge($selectField, $allAlias);
         }
+        if (is_string($selectField) && strpos($selectField, 'this.') !== false) {
+            $mainField = false;
+        }
         $model = $this->setBaseQuery($alias, $mainField, $join, $type)->field($selectField);
         if (strtolower($isOr) === "or") {
             $model->whereOr($where);
@@ -507,6 +585,36 @@ trait BaseModel
             }
         }
         return $model;
+    }
+
+    /**
+     * setModelData
+     * @param $source
+     * @param bool $isFind
+     */
+    private function setModelData($source, $isFind = false)
+    {
+        if ($isFind) {
+            if ($source !== null) {
+                $this->modelData = $source->getData();
+            }
+        } else {
+            if (count($source) > 0) {
+                foreach ($source as $item) {
+                    $this->modelData[] = $item->getData();
+                }
+            }
+        }
+    }
+
+    /**
+     * buildReturn
+     * @param $data
+     * @return array
+     */
+    private function buildReturn($data)
+    {
+        return $data ? $data->toArray() : [];
     }
 
     /**
@@ -537,9 +645,9 @@ trait BaseModel
             $action              = request()->action();
             $pageConfigList      = PaginateEnum::ONE_PAGE_LIMIT;
             $pageConfigListKeys  = array_keys($pageConfigList);
-            $operateToApp        = strtolower($app . "/*/*");
-            $operateToController = strtolower($app . "/" . $controller . "/*");
-            $operateToAction     = strtolower($app . "/" . $controller . "/" . $action);
+            $operateToApp        = $app . "/*/*";
+            $operateToController = $app . "/" . $controller . "/*";
+            $operateToAction     = $app . "/" . $controller . "/" . $action;
             if (in_array($operateToAction, $pageConfigListKeys)) {
                 // 精确到操作
                 $pageLimit = $pageConfigList[$operateToAction];
@@ -588,7 +696,7 @@ trait BaseModel
      * @param int $level
      * @return mixed
      */
-    protected function arrayLevel($array, $level = 1)
+    protected function arrayLevel($array, int $level = 1)
     {
         if (!is_array($array)) {
             return 0;
@@ -611,6 +719,15 @@ trait BaseModel
     public function getModelError()
     {
         return $this->modelError;
+    }
+
+    /**
+     * 获取模型原始数据
+     * @return mixed|array
+     */
+    public function getModelData()
+    {
+        return !empty($this->getData()) ? $this->getData() : $this->modelData;
     }
 
     /**
@@ -675,15 +792,16 @@ trait BaseModel
             }
             $list = $this->formatList($list);
             if ($isModel) {
-                return $this->saveAll($list);
+                $this->saveAll($list);
+                return $this;
             } else {
                 $res  = $this->saveAll($list);
                 $data = [];
                 foreach ($res as &$item) {
                     if ($isMillisecond) {
-                        array_push($data, $this->hiddenField($item->getData()));
+                        array_push($data, $this->hiddenField($item->getData(), true));
                     } else {
-                        $item = $this->hiddenField($item->getData());
+                        $item = $this->hiddenField($item->getData(), true);
                         if (isset($item['create_time'])) {
                             $item['create_time'] = $this->formatTime($item['create_time']);
                         }
@@ -717,7 +835,7 @@ trait BaseModel
                 $this->modelError = "新增数据 list 结构必须是 2维数组";
                 return false;
             }
-            $list = array_values($this->formatList($list));
+            $list = $this->formatList($list, true);
             if ($autoTime) {
                 if (isset($this->schema['create_time']) || isset($this->schema['update_time'])) {
                     $addField = [];
@@ -764,13 +882,13 @@ trait BaseModel
                         return false;
                     }
                 }
-                $res = static::update($data);
-                if ($res) {
+                $data = $this->filterField($data);
+                static::where($idName, $data[$idName])->update($data);
+                if (!$isModel) {
                     $res = $this->queryChain($data[$idName], 'and', $queryType)->find();
+                } else {
+                    return $this;
                 }
-            }
-            if ($isModel) {
-                return empty($res) ? $this : $res;
             }
             if (empty($res)) {
                 return [];
@@ -805,8 +923,12 @@ trait BaseModel
                 $this->modelError = "where OR field is not empty";
                 return false;
             }
-            $idName = $this->getPk();
-            $model  = $this->genBaseModel($where, $idName);
+            $idName = $this->parsePk();
+            if (empty($idName) && !(is_array($where) || $where instanceof \Closure) && $where !== "*") {
+                $this->modelError = "未设置主键，无法根据主键更新";
+                return false;
+            }
+            $model = $this->genBaseModel($where, $idName);
             if (is_array($field)) {
                 $res = $model->update($field);
             } else {
@@ -837,23 +959,11 @@ trait BaseModel
     public function fieldInc($where = [], string $field = "", $step = 1)
     {
         try {
-            if (empty($where) || empty($field)) {
-                $this->modelError = "where OR field is not empty";
+            $model = $this->genStepModel($where, $field, $step);
+            if ($model === false) {
                 return false;
             }
-            if (!is_numeric($step)) {
-                $this->modelError = "step must be numeric";
-                return false;
-            }
-            if ((float)$step == 0) {
-                $this->modelError = "step:0";
-                return false;
-            } else {
-                $step = (float)$step;
-            }
-            $idName = $this->getPk();
-            $model  = $this->genBaseModel($where, $idName);
-            $res    = $model->inc($field, $step)->update();
+            $res = $model['model']->inc($field, $model['step'])->update();
             if ($res) {
                 return true;
             }
@@ -877,23 +987,11 @@ trait BaseModel
     public function fieldDec($where = [], string $field = "", $step = 1)
     {
         try {
-            if (empty($where) || empty($field)) {
-                $this->modelError = "where OR field is not empty";
+            $model = $this->genStepModel($where, $field, $step);
+            if ($model === false) {
                 return false;
             }
-            if (!is_numeric($step)) {
-                $this->modelError = "step must be numeric";
-                return false;
-            }
-            if ((float)$step == 0) {
-                $this->modelError = "step:0";
-                return false;
-            } else {
-                $step = (float)$step;
-            }
-            $idName = $this->getPk();
-            $model  = $this->genBaseModel($where, $idName);
-            $res    = $model->dec($field, $step)->update();
+            $res = $model['model']->dec($field, $model['step'])->update();
             if ($res) {
                 return true;
             }
@@ -907,7 +1005,7 @@ trait BaseModel
     }
 
     /**
-     * 指定字段自增/自减（支持主键查询，支持多字段步进处理）
+     * 多字段自增/自减（支持主键查询，支持多字段步进处理）
      *
      * @param array|string|int|callable $where 条件数组 或 主键id值
      * @param array $fields 字段二维数组 [[field1,inc,step1],[field2,dec,step2]]
@@ -920,8 +1018,23 @@ trait BaseModel
                 $this->modelError = "where OR field is not empty";
                 return false;
             }
-            $stepAllow  = ["inc", "dec"];
-            $idName     = $this->getPk();
+            $stepAllow = ["inc", "dec"];
+            $allowType = [
+                'tinyint',
+                'smallint',
+                'mediumint',
+                'int',
+                'integer',
+                'bigint',
+                'float',
+                'double',
+                'decimal'
+            ];
+            $idName    = $this->parsePk();
+            if (empty($idName) && !(is_array($where) || $where instanceof \Closure) && $where !== "*") {
+                $this->modelError = "未设置主键，无法根据主键更新";
+                return false;
+            }
             $model      = $this->genBaseModel($where, $idName);
             $fieldLevel = $this->arrayLevel($fields);
             if ($fieldLevel == 1) {
@@ -929,9 +1042,15 @@ trait BaseModel
                     $this->modelError = "fields param error";
                     return false;
                 }
-                if (empty($fields[2]) || !is_numeric($fields[2])) {
+                if (empty($fields[2]) || !is_numeric($fields[2]) || (float)$fields[2] <= 0) {
                     $this->modelError = "step must be numeric and > 0";
                     return false;
+                }
+                if (!empty($this->schema[$fields[0]])) {
+                    if (!in_array($this->schema[$fields[0]], $allowType)) {
+                        $this->modelError = "field format error, must be numeric type";
+                        return false;
+                    }
                 }
                 $field       = $fields[0];
                 $stepOperate = $fields[1];
@@ -941,29 +1060,31 @@ trait BaseModel
                     return true;
                 }
             } elseif ($fieldLevel == 2) {
-                $this->startTrans();
                 foreach ($fields as $item) {
                     if (empty($item[1]) || !in_array($item[1], $stepAllow)) {
                         $this->modelError = "fields param error";
-                        $this->rollback();
                         return false;
                     }
-                    if (empty($item[2]) || !is_numeric($item[2])) {
+                    if (empty($item[2]) || !is_numeric($item[2]) || (float)$item[2] <= 0) {
                         $this->modelError = "step must be numeric and > 0";
-                        $this->rollback();
                         return false;
+                    }
+                    if (!empty($this->schema[$item[0]])) {
+                        if (!in_array($this->schema[$item[0]], $allowType)) {
+                            $this->modelError = "field format error, must be numeric type";
+                            return false;
+                        }
                     }
                     $field       = $item[0];
                     $stepOperate = $item[1];
                     $step        = (float)$item[2];
-                    $res         = $model->$stepOperate($field, $step)->update();
-                    if (!$res) {
-                        $this->modelError = "步进处理失败";
-                        $this->rollback();
-                        return false;
-                    }
+                    $model       = $model->$stepOperate($field, $step);
                 }
-                $this->commit();
+                $res = $model->update([]);
+                if (!$res) {
+                    $this->modelError = "步进处理失败";
+                    return false;
+                }
                 return true;
             }
             $this->modelError = "步进处理失败";
@@ -990,6 +1111,7 @@ trait BaseModel
     public function updateAll($where = [], array $data = [], string $isOr = "and")
     {
         try {
+            $this->modelData = [];
             if (empty($where) && empty($data)) {
                 $this->modelError = "where OR data is not empty";
                 return false;
@@ -1068,6 +1190,7 @@ trait BaseModel
     public function updateAllRaw(string $where = "", array $data = [], array $bind = [])
     {
         try {
+            $this->modelData = [];
             if (empty($where) || empty($data)) {
                 $this->modelError = "where OR data is not empty";
                 return false;
@@ -1124,7 +1247,11 @@ trait BaseModel
                 $this->modelError = "where is not empty";
                 return false;
             }
-            $idName          = $this->getPk();
+            $idName = $this->parsePk();
+            if (empty($idName) && !(is_array($where) || $where instanceof \Closure) && $where !== "*") {
+                $this->modelError = "未设置主键，无法根据主键删除";
+                return false;
+            }
             $deleteTimeField = '';
             $time            = '';
             $dbTimeType      = ['timestamp', 'datetime', 'year', 'date', 'time', 'int'];
@@ -1141,9 +1268,9 @@ trait BaseModel
                         $data->delete();
                         return $delNum;
                     } elseif (isset($this->schema[$deleteTimeField]) && in_array(
-                            $this->schema[$deleteTimeField],
-                            $dbTimeType
-                        )) {
+                        $this->schema[$deleteTimeField],
+                        $dbTimeType
+                    )) {
                         $time = $this->genDateTime($this->schema[$deleteTimeField]);
                     } elseif (isset($this->schema['delete_time'])) {
                         $deleteTimeField = 'delete_time';
@@ -1194,6 +1321,37 @@ trait BaseModel
     }
 
     /**
+     * 恢复软删除数据
+     *
+     * @param array $where
+     * @param string $isOr
+     * @return bool|int|\think\Model
+     */
+    public function recoverDel($where = [], string $isOr = "and")
+    {
+        try {
+            $idName = $this->getPk();
+            $ids    = $this->queryChain($where, $isOr, MethodEnum::ONLY_SOFT)->column($idName);
+            if (count($ids) > 0) {
+                $deleteTimeField = "";
+                if (!empty($this->deleteTime) && is_string($this->deleteTime)) {
+                    $deleteTimeField = $this->deleteTime;
+                } elseif (isset($this->schema['delete_time'])) {
+                    $deleteTimeField = 'delete_time';
+                }
+                if (!empty($deleteTimeField)) {
+                    return static::where($idName, "in", $ids)->update([$deleteTimeField => null]);
+                }
+            }
+            return 0;
+        } catch (\Exception $e) {
+            // 返回model错误
+            $this->modelError = $e->getMessage();
+            return false;
+        }
+    }
+
+    /**
      * 删除数据（原生where查询，不支持直接传入主键id值删除，其他规则同remove）
      *
      * @param string $where 查询条件原生SQL字符串
@@ -1225,9 +1383,9 @@ trait BaseModel
                         $data->delete();
                         return $delNum;
                     } elseif (isset($this->schema[$deleteTimeField]) && in_array(
-                            $this->schema[$deleteTimeField],
-                            $dbTimeType
-                        )) {
+                        $this->schema[$deleteTimeField],
+                        $dbTimeType
+                    )) {
                         $time = $this->genDateTime($this->schema[$deleteTimeField]);
                     } elseif (isset($this->schema['delete_time'])) {
                         $deleteTimeField = 'delete_time';
@@ -1322,15 +1480,24 @@ trait BaseModel
                 $queryType = MethodEnum::WITH_SOFT;
             }
             $model = $this->filterSoftDelData($model, $queryType);
-            $model = is_array($field) ? $model->field($field) : $model->fieldRaw((string)$field);
+            $model = is_array($field) || $field === true ? $model->field($field) : $model->fieldRaw((string)$field);
             if ($isSelect) {
                 $data = $model->limit(1)->select();
-                $all  = $data ? $data->toArray() : [];
+                $this->setModelData($data);
+                $all = $this->buildReturn($data);
             } else {
                 $data = $model->find();
-                $all  = $data ? $data->toArray() : null;
-                if ($all !== null && count($all) == 1) {
-                    $all = $all[array_keys($all)[0]];
+                if ($data !== null) {
+                    $this->setModelData($data, true);
+                    $all = $data->toArray();
+                    if (count($all) == 1 && count($this->modelData) == 1) {
+                        $all = $all[array_keys($all)[0]];
+                    }
+                    if (empty($all)) {
+                        $all = null;
+                    }
+                } else {
+                    $all = null;
                 }
             }
             return $all;
@@ -1345,26 +1512,28 @@ trait BaseModel
      * 查询一条（支持主键查询，支持select查询返回二维数组，默认select查询）
      *
      * @param array|string|int|callable $where 条件数组 条件闭包 或 主键id值
+     * @param array $order 原生排序SQL语句 或 数组 如：['price','id'=>'desc'] 生成的SQL为 ORDER BY `price`,`id` desc
      * @param string $isOr 是否是 OR 查询 默认 AND
-     * @param bool $isSelect 是否是 select 查询 默认 true
-     * @return array|bool|null 返回结果数组或NULL
+     * @param bool $isFind 是否是 find 查询 默认 false
+     * @return array|bool|null 返回结果数组
      */
-    public function selectOne($where = [], string $isOr = "and", bool $isSelect = true)
+    public function selectOne($where = [], $order = [], string $isOr = "and", bool $isFind = false)
     {
         try {
             if (empty($where)) {
                 $this->modelError = "where is not empty";
                 return false;
             }
-            $idName = $this->getPk();
-            $model  = $this->genBaseModel($where, $idName, $isOr);
-            $model  = $this->filterSoftDelData($model);
-            if ($isSelect) {
-                $data = $model->limit(1)->select();
-                $all  = $data ? $data->toArray() : [];
+            $model = $this->queryChain($where, $isOr);
+            $model = is_array($order) ? $model->order($order)->limit(1) : $model->orderRaw((string)$order)->limit(1);
+            if (!$isFind) {
+                $data = $model->select();
+                $this->setModelData($data);
+                $all = $this->buildReturn($data);
             } else {
                 $data = $model->find();
-                $all  = $data ? $data->toArray() : null;
+                $this->setModelData($data, true);
+                $all = $this->buildReturn($data);
             }
             return $all;
         } catch (\Exception $e) {
@@ -1394,15 +1563,14 @@ trait BaseModel
                 $this->modelError = "where is not empty";
                 return false;
             }
-            $idName = $this->getPk();
-            $model  = $this->genBaseModel($where, $idName, $isOr);
-            $model  = $this->filterSoftDelData($model);
-            $model  = $model->withoutField($withoutField);
+            $model = $this->queryChain($where, $isOr);
+            $model = $model->withoutField($withoutField);
             if ($isModel) {
                 return $model;
             }
             $data = $model->select();
-            $all  = $data ? $data->toArray() : [];
+            $this->setModelData($data);
+            $all = $this->buildReturn($data);
             return $all;
         } catch (\Exception $e) {
             // 返回model错误
@@ -1416,22 +1584,20 @@ trait BaseModel
      *
      * @param array|string|int|callable $where 条件数组 条件闭包 或 主键id值
      * @param array $order 原生排序SQL语句 或 数组 如：['price','id'=>'desc'] 生成的SQL为 ORDER BY `price`,`id` desc
-     * @param string $limit 限制条数 默认 * 不限制
      * @param string $isOr 是否是 OR 查询 默认 AND
+     * @param string $limit 限制条数 默认 * 不限制
      * @param bool $isModel 是否返回Model对象（默认 false 如果返回Model对象，我们还可以链式调用TP的分页，进行分页操作）
      * @return array|bool|\think\Model 返回结果数组
      */
-    public function selectSort($where = [], $order = [], $limit = "*", string $isOr = "and", bool $isModel = false)
+    public function selectSort($where = [], $order = [], string $isOr = "and", $limit = "*", bool $isModel = false)
     {
         try {
             if (empty($where)) {
                 $this->modelError = "where is not empty";
                 return false;
             }
-            $idName = $this->getPk();
-            $model  = $this->genBaseModel($where, $idName, $isOr);
-            $model  = $this->filterSoftDelData($model);
-            $model  = is_array($order) ? $model->order($order) : $model->orderRaw((string)$order);
+            $model = $this->queryChain($where, $isOr);
+            $model = is_array($order) ? $model->order($order) : $model->orderRaw((string)$order);
             if ($limit === "*") {
             } else {
                 $model = $model->limit((int)$limit);
@@ -1440,7 +1606,47 @@ trait BaseModel
                 return $model;
             }
             $data = $model->select();
-            $all  = $data ? $data->toArray() : [];
+            $this->setModelData($data);
+            $all = $this->buildReturn($data);
+            return $all;
+        } catch (\Exception $e) {
+            // 返回model错误
+            $this->modelError = $e->getMessage();
+            return false;
+        }
+    }
+
+    /**
+     * 查询List（支持分页，支持each回调）
+     *
+     * @param array|string|callable $where 条件数组 条件闭包（如果需要查询整张表全部数据，可以传*）
+     * @param array|string $order 原生排序SQL语句 或 数组 如：['price','id'=>'desc'] 生成的SQL为 ORDER BY `price`,`id` desc
+     * @param callable|null $each 闭包回调函数（有些情况下我们需要对于查询出来的分页数据进行循环处理，通过each传入闭包处理函数即可）
+     * @param int $pageLimit 分页每页显示记录数  默认 0 自动取 PaginateEnum 枚举类配置的条数
+     * @param string $isOr 是否是 OR 查询 默认 AND
+     * @return array|bool 返回 查询后的分页数据
+     */
+    public function selectList(
+        $where = [],
+        $order = [],
+        callable $each = null,
+        int $pageLimit = 0,
+        string $isOr = "and"
+    ) {
+        try {
+            if (empty($where)) {
+                $this->modelError = "where is not empty";
+                return false;
+            }
+            $model      = $this->queryChain($where, $isOr);
+            $model      = is_array($order) ? $model->order($order) : $model->orderRaw((string)$order);
+            $pageConfig = $this->getPaginateConfig($pageLimit);
+            if (!empty($each)) {
+                $data = $model->paginate($pageConfig, false)->each($each);
+            } else {
+                $data = $model->paginate($pageConfig, false);
+            }
+            $all = $this->buildReturn($data);
             return $all;
         } catch (\Exception $e) {
             // 返回model错误
@@ -1464,17 +1670,22 @@ trait BaseModel
                 $this->modelError = "where is not empty";
                 return false;
             }
-            $idName = $this->getPk();
-            $model  = $this->genBaseModel($where, $idName, $isOr);
-            $model  = $this->filterSoftDelData($model);
-            $order  = [$idName => "asc"];
+            $idName = $this->parsePk();
+            $model  = $this->queryChain($where, $isOr);
+            if (!empty($idName)) {
+                $order = [$idName => "asc"];
+            } else {
+                $order = [];
+            }
             if (isset($this->schema['create_time'])) {
                 $order['create_time'] = "asc";
             }
             $data = $model->order($order)->limit((int)$limit)->select();
-            $all  = $data ? $data->toArray() : [];
+            $this->setModelData($data);
+            $all = $this->buildReturn($data);
             if (!empty($all) && count($all) == 1 && $limit == 1) {
-                $all = $all[0];
+                $this->modelData = isset($this->modelData[0]) ? $this->modelData[0] : [];
+                $all             = $all[0];
             }
             return $all;
         } catch (\Exception $e) {
@@ -1499,20 +1710,33 @@ trait BaseModel
                 $this->modelError = "where is not empty";
                 return false;
             }
-            $idName = $this->getPk();
-            $model  = $this->genBaseModel($where, $idName, $isOr);
-            $model  = $this->filterSoftDelData($model);
-            $order  = [$idName => "desc"];
+            $idName = $this->parsePk();
+            $model  = $this->queryChain($where, $isOr);
+            if (!empty($idName)) {
+                $order = [$idName => "desc"];
+            } else {
+                $order = [];
+            }
             if (isset($this->schema['create_time'])) {
                 $order['create_time'] = "desc";
             }
             if (isset($this->schema['update_time'])) {
                 $order['update_time'] = "desc";
             }
+            if (empty($order)) {
+                if (!empty($this->schema) && is_array($this->schema)) {
+                    $order = [array_keys($this->schema)[0] => "desc"];
+                } else {
+                    $this->modelError = "未设置主键，无法根据主键排序";
+                    return false;
+                }
+            }
             $data = $model->order($order)->limit((int)$limit)->select();
-            $all  = $data ? $data->toArray() : [];
+            $this->setModelData($data);
+            $all = $this->buildReturn($data);
             if (!empty($all) && count($all) == 1 && $limit == 1) {
-                $all = $all[0];
+                $this->modelData = isset($this->modelData[0]) ? $this->modelData[0] : [];
+                $all             = $all[0];
             }
             return $all;
         } catch (\Exception $e) {
@@ -1537,14 +1761,14 @@ trait BaseModel
                 $this->modelError = "where is not empty";
                 return false;
             }
-            $idName = $this->getPk();
-            $model  = $this->genBaseModel($where, $idName, $isOr);
-            $model  = $this->filterSoftDelData($model);
-            $order  = "RAND()";
-            $data   = $model->orderRaw($order)->limit((int)$limit)->select();
-            $all    = $data ? $data->toArray() : [];
+            $model = $this->queryChain($where, $isOr);
+            $order = "RAND()";
+            $data  = $model->orderRaw($order)->limit((int)$limit)->select();
+            $this->setModelData($data);
+            $all = $this->buildReturn($data);
             if (!empty($all) && count($all) == 1 && $limit == 1) {
-                $all = $all[0];
+                $this->modelData = isset($this->modelData[0]) ? $this->modelData[0] : [];
+                $all             = $all[0];
             }
             return $all;
         } catch (\Exception $e) {
@@ -1587,7 +1811,8 @@ trait BaseModel
                 return $model;
             }
             $data = $model->select();
-            $all  = $data ? $data->toArray() : [];
+            $this->setModelData($data);
+            $all = $this->buildReturn($data);
             return $all;
         } catch (\Exception $e) {
             // 返回model错误
@@ -1633,7 +1858,8 @@ trait BaseModel
                 return $model;
             }
             $data = $model->select();
-            $all  = $data ? $data->toArray() : [];
+            $this->setModelData($data);
+            $all = $this->buildReturn($data);
             return $all;
         } catch (\Exception $e) {
             // 返回model错误
@@ -1679,7 +1905,8 @@ trait BaseModel
                 return $model;
             }
             $data = $model->select();
-            $all  = $data ? $data->toArray() : [];
+            $this->setModelData($data);
+            $all = $this->buildReturn($data);
             return $all;
         } catch (\Exception $e) {
             // 返回model错误
@@ -1705,7 +1932,7 @@ trait BaseModel
         $where = [],
         array $fieldAndVal = [],
         $order = [],
-        string $isOr = " and ",
+        string $isOr = "and",
         bool $isModel = false
     ) {
         try {
@@ -1723,7 +1950,8 @@ trait BaseModel
                 return $model;
             }
             $data = $model->select();
-            $all  = $data ? $data->toArray() : [];
+            $this->setModelData($data);
+            $all = $this->buildReturn($data);
             return $all;
         } catch (\Exception $e) {
             // 返回model错误
@@ -1746,7 +1974,7 @@ trait BaseModel
         $where = [],
         array $fieldAndVal = [],
         $order = [],
-        string $isOr = " and ",
+        string $isOr = "and",
         bool $isModel = false
     ) {
         try {
@@ -1768,48 +1996,8 @@ trait BaseModel
                 return $model;
             }
             $data = $model->select();
-            $all  = $data ? $data->toArray() : [];
-            return $all;
-        } catch (\Exception $e) {
-            // 返回model错误
-            $this->modelError = $e->getMessage();
-            return false;
-        }
-    }
-
-    /**
-     * 查询List（支持分页，支持each回调）
-     *
-     * @param array|string|callable $where 条件数组 条件闭包（如果需要查询整张表全部数据，可以传*）
-     * @param array|string $order 原生排序SQL语句 或 数组 如：['price','id'=>'desc'] 生成的SQL为 ORDER BY `price`,`id` desc
-     * @param callable|null $each 闭包回调函数（有些情况下我们需要对于查询出来的分页数据进行循环处理，通过each传入闭包处理函数即可）
-     * @param int $pageLimit 分页每页显示记录数  默认 0 自动取 PaginateEnum 枚举类配置的条数
-     * @param string $isOr 是否是 OR 查询 默认 AND
-     * @return array|bool 返回 查询后的分页数据
-     */
-    public function selectList(
-        $where = [],
-        $order = [],
-        callable $each = null,
-        int $pageLimit = 0,
-        string $isOr = "and"
-    ) {
-        try {
-            if (empty($where)) {
-                $this->modelError = "where is not empty";
-                return false;
-            }
-            $idName     = $this->getPk();
-            $model      = $this->genBaseModel($where, $idName, $isOr);
-            $model      = $this->filterSoftDelData($model);
-            $model      = is_array($order) ? $model->order($order) : $model->orderRaw((string)$order);
-            $pageConfig = $this->getPaginateConfig($pageLimit);
-            if (!empty($each)) {
-                $data = $model->paginate($pageConfig, false)->each($each);
-            } else {
-                $data = $model->paginate($pageConfig, false);
-            }
-            $all = $data ? $data->toArray() : [];
+            $this->setModelData($data);
+            $all = $this->buildReturn($data);
             return $all;
         } catch (\Exception $e) {
             // 返回model错误
@@ -1835,8 +2023,7 @@ trait BaseModel
                 return false;
             }
             $idName = $this->getPk();
-            $model  = $this->genBaseModel($where, $idName, $isOr);
-            $model  = $this->filterSoftDelData($model);
+            $model  = $this->queryChain($where, $isOr);
             if (is_array($field) && !empty($field)) {
                 $field = implode(",", $field);
             } elseif (empty($field) && empty($index)) {
@@ -1845,7 +2032,7 @@ trait BaseModel
             } elseif (empty($field)) {
                 $field = "*";
             }
-            return $model->column($field, $index);
+            return $this->hiddenField($model->column($field, $index));
         } catch (\Exception $e) {
             // 返回model错误
             $this->modelError = $e->getMessage();
@@ -1864,10 +2051,11 @@ trait BaseModel
      * @param array $join 连接的表 示例：此字段写二维数组 [['order_goods og', 'order_id', 'id'],...] 允许多个表联查
      *
      *                            参数说明：1、每个第二维的数组都表示一张联查表，下面的说明，括号为可选
-     *                                        ['联查表 (别名)', '联查表外键字段', ('主表主键字段')]
+     *                                        ['联查表 (别名)', '联查表外键字段', ('主表主键字段'), ('连接类型')]
      *
      *                                     2、如果你的主键与外键的字段名一致的话，可以省略第三个参数
      *                                        以上第三个【主表主键字段】参数不传，默认使用【联查表外键字段】进行联查
+     *                                        第四个参数为【连接类型】，主要用于多张表不同连接类型的情况，优先级高于$type参数
      *
      *                                     3、完整调用示例
      *                                        $orderModel = new OrderDao();
@@ -1898,6 +2086,8 @@ trait BaseModel
                 } else {
                     $field = $aliasValue . "." . $field[0];
                 }
+            } elseif ($field === false) {
+                $field = [];
             } else {
                 $field = "{$aliasValue}.*";
             }
@@ -1905,7 +2095,7 @@ trait BaseModel
             // join条件
             if (!empty($join)) {
                 $allowType = ['join', 'leftJoin', 'rightJoin', 'fullJoin'];
-                $type      = in_array($type, $allowType) ? $type : 'join';
+                $type      = in_array((string)$type, $allowType) ? $type : 'join';
                 if ($this->arrayLevel($join) == 1) {
                     if (preg_match("/( |　|\s)/", $join[0])) {
                         // 带别名
@@ -1915,14 +2105,21 @@ trait BaseModel
                         // 不带别名
                         $tb = $tbAlias = $join[0];
                     }
+                    if (isset($join[3]) && in_array((string)$join[3], $allowType)) {
+                        $type = $join[3];
+                    }
                     $model->$type($join[0], "{$tbAlias}.{$join[1]}={$aliasValue}."
                         . (isset($join[2]) ? $join[2] : $join[1]));
                     // 联查表软删除过滤
                     $className = "app\\model\\entity\\" . ucfirst($this->toHumpScore($tb));
                     if (class_exists($className)) {
                         ${$tb . "Class"} = new $className;
-                        $model           = $this->filterSoftDelData($model, MethodEnum::EXCLUDE_SOFT, $tbAlias,
-                            ${$tb . "Class"});
+                        $model           = $this->filterSoftDelData(
+                            $model,
+                            MethodEnum::EXCLUDE_SOFT,
+                            $tbAlias,
+                            ${$tb . "Class"}
+                        );
                     }
                 } else {
                     foreach ($join as $item) {
@@ -1933,6 +2130,9 @@ trait BaseModel
                         } else {
                             // 不带别名
                             $tb = $tbAlias = $item[0];
+                        }
+                        if (isset($item[3]) && in_array((string)$item[3], $allowType)) {
+                            $type = $item[3];
                         }
                         $model->$type($item[0], "{$tbAlias}.{$item[1]}={$aliasValue}."
                             . (isset($item[2]) ? $item[2] : $item[1]));
@@ -1986,7 +2186,8 @@ trait BaseModel
                 return $model;
             }
             $data = $model->select();
-            $all  = $data ? $data->toArray() : [];
+            $this->setModelData($data);
+            $all = $this->buildReturn($data);
             return $all;
         } catch (\Exception $e) {
             // 返回model错误
@@ -2021,7 +2222,8 @@ trait BaseModel
                 return $model;
             }
             $data = $model->select();
-            $all  = $data ? $data->toArray() : [];
+            $this->setModelData($data);
+            $all = $this->buildReturn($data);
             return $all;
         } catch (\Exception $e) {
             // 返回model错误
@@ -2056,7 +2258,8 @@ trait BaseModel
                 return $model;
             }
             $data = $model->select();
-            $all  = $data ? $data->toArray() : [];
+            $this->setModelData($data);
+            $all = $this->buildReturn($data);
             return $all;
         } catch (\Exception $e) {
             // 返回model错误
@@ -2091,7 +2294,8 @@ trait BaseModel
                 return $model;
             }
             $data = $model->select();
-            $all  = $data ? $data->toArray() : [];
+            $this->setModelData($data);
+            $all = $this->buildReturn($data);
             return $all;
         } catch (\Exception $e) {
             // 返回model错误
@@ -2179,9 +2383,9 @@ trait BaseModel
                                 array_push($mainField, substr($field, 5));
                                 unset($fields[$k]);
                             } elseif (!preg_match("/\./", $field) && isset($this->schema) && in_array(
-                                    $field,
-                                    array_keys($this->schema)
-                                )) {
+                                $field,
+                                array_keys($this->schema)
+                            )) {
                                 // 区分是否是主表字段
                                 array_push($mainField, $field);
                                 unset($fields[$k]);
@@ -2246,8 +2450,12 @@ trait BaseModel
                             }
                             $child = $childClass::alias($tbAlias)->field($selectField)
                                 ->where($foreignKey, "in", $mainKeyArray);
-                            $child = $this->filterSoftDelData($child, MethodEnum::EXCLUDE_SOFT, $tbAlias,
-                                new $childClass);
+                            $child = $this->filterSoftDelData(
+                                $child,
+                                MethodEnum::EXCLUDE_SOFT,
+                                $tbAlias,
+                                new $childClass
+                            );
                             $child = $child->select();
                             if (count($child->toArray()) > 0) {
                                 // 拼装
@@ -2284,7 +2492,8 @@ trait BaseModel
             } else {
                 $data = $model;
             }
-            $all = $data ? $data->toArray() : [];
+            $this->setModelData($data);
+            $all = $this->buildReturn($data);
             return $all;
         } catch (\Exception $e) {
             // 返回model错误
