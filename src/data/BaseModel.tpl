@@ -248,7 +248,7 @@ trait BaseModel
      */
     private function parseWhere($where)
     {
-        $levelWhere = $this->arrayLevel($where);
+        $levelWhere = is_array($where) ? $this->arrayLevel($where) : 0;
         if (is_array($where) && ($levelWhere == 1 || $levelWhere == 2)
             && !empty($where[1]) && is_string($where[1])) {
             if (in_array(strtolower($where[1]), $this->getWhereExp())) {
