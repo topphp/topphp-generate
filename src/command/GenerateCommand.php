@@ -41,7 +41,7 @@ class GenerateCommand extends Command
     protected function configure()
     {
         $this->setName('gen:db')
-            ->addOption('camel', 'c', Option::VALUE_OPTIONAL, '指定生成字段注释为驼峰命名', 'yes')
+            ->addOption('camel', 'c', Option::VALUE_OPTIONAL, '指定生成字段注释为驼峰命名', 'false')
             ->addOption('table', 't', Option::VALUE_OPTIONAL, '指定生成实体类的表名,默认为所有表格', 'all')
             ->addOption('base_model', 'b', Option::VALUE_OPTIONAL, '指定生成实体类的表名,默认为所有表格', 'yes')
             ->setDescription('生成数据库实体模型');
