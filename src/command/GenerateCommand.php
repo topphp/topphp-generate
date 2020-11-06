@@ -41,6 +41,7 @@ class GenerateCommand extends Command
     protected function configure()
     {
         $this->setName('gen:db')
+            ->addOption('camel', 'c', Option::VALUE_OPTIONAL, '指定生成字段注释为驼峰命名', 'yes')
             ->addOption('table', 't', Option::VALUE_OPTIONAL, '指定生成实体类的表名,默认为所有表格', 'all')
             ->addOption('base_model', 'b', Option::VALUE_OPTIONAL, '指定生成实体类的表名,默认为所有表格', 'yes')
             ->setDescription('生成数据库实体模型');
@@ -103,8 +104,12 @@ FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME=? AND TABLE_SCHEMA=?',
                 $schema = [];   // 设置模型的 schema 字段信息
                 foreach ($columns as $column) {
                     // 类头添加字段注释
+                    $camelColumnName = $column['COLUMN_NAME'];
+                    if ($this->input->hasOption('camel') && $this->input->getOption('camel') === 'yes') {
+                        $camelColumnName = Str::camel($column['COLUMN_NAME']);
+                    }
                     $class->addTrait("app\model\\{$baseModel}")
-                        ->addComment("@property {$this->checkType($column['DATA_TYPE'])} \${$column['COLUMN_NAME']} {$column['COLUMN_COMMENT']}");
+                        ->addComment("@property {$this->checkType($column['DATA_TYPE'])} \${$camelColumnName} {$column['COLUMN_COMMENT']}");
                     // 判断字段为主键则定义 $pk属性.
                     if ($column['COLUMN_KEY'] === 'PRI') {
                         $class->addProperty('pk', $column['COLUMN_NAME'])->setProtected();
@@ -135,7 +140,7 @@ FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME=? AND TABLE_SCHEMA=?',
         }
     }
 
-    private function createBaseModel(string $modelName): String
+    private function createBaseModel(string $modelName): string
     {
         if ($this->input->hasOption('base_model') && $this->input->getOption('base_model') === 'yes') {
             $baseModelFile = dirname(dirname(__FILE__)) . DIRECTORY_SEPARATOR
