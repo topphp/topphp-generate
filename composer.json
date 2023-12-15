@@ -14,7 +14,7 @@
     "require": {
         "php": ">=7.2",
         "nette/php-generator": "^3.3",
-        "topthink/framework": "^6.0.2"
+        "topthink/framework": ">=6.0.2"
     },
     "require-dev": {
         "squizlabs/php_codesniffer": "^3.5",
